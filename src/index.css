@@ -1,0 +1,17 @@
+@import "tailwindcss";
+@import 'leaflet/dist/leaflet.css';
+
+@keyframes shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(to right, #e5e7eb 8%, #f3f4f6 18%, #e5e7eb 33%);
+  background-size: 800px 100%;
+  animation: shimmer 1.5s infinite linear;
+}
