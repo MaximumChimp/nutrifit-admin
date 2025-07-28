@@ -4,6 +4,7 @@ import { FiUploadCloud } from 'react-icons/fi'
 import { collection, addDoc, getDocs, deleteDoc, doc ,serverTimestamp,query, orderBy} from 'firebase/firestore'
 import { db } from '../../../firebase-config'
 import { v4 as uuidv4 } from 'uuid'
+import { XMarkIcon } from '@heroicons/react/20/solid';
 
 const categories = ['All', 'Breakfast', 'Lunch', 'Dinner']
 
@@ -23,7 +24,18 @@ const MealCardSkeleton = () => (
     </div>
   </div>
 )
+const commonIngredients = [
+  'chicken', 'beef', 'pork', 'tofu', 'rice', 'egg', 'milk',
+  'cheese', 'bread', 'lettuce', 'tomato', 'onion', 'garlic',
+  'carrot', 'potato', 'spinach', 'broccoli', 'pepper',
+  'olive oil', 'butter', 'yogurt', 'oats', 'banana', 'apple',
+];
 
+const goals = [
+  'Weight Loss',
+  'Maintain Weight',
+  'Weight Gain',
+];
 export default function Meals() {
   // --- State ---
   const [meals, setMeals] = useState([])
@@ -38,14 +50,11 @@ export default function Meals() {
   const [calories, setCalories] = useState('')
   const [price, setPrice] = useState('')
   const [category, setCategory] = useState('Breakfast')
-  const [dietType, setDietType] = useState('Balanced')
   const [goodFor, setGoodFor] = useState([])
   const [available, setAvailable] = useState(true)
   const [image, setImage] = useState(null)
   const [preview, setPreview] = useState(null)
-  const [dietTypes, setDietTypes] = useState(['Balanced', 'Keto', 'Vegan', 'Low Carb', 'Paleo']);
-  const [showAddDietModal, setShowAddDietModal] = useState(false);
-  const [newDietType, setNewDietType] = useState('');
+  const [goal, setGoal] = useState('Weight Loss')
   const [showAddTagModal, setShowAddTagModal] = useState(false);
   const [newTag, setNewTag] = useState('');
   const dropRef = useRef()
@@ -55,50 +64,24 @@ export default function Meals() {
   const [protein, setProtein] = useState('');
   const [carbs, setCarbs] = useState('');
   const [fat, setFat] = useState('');
+  const [ingredients, setIngredients] = useState([]);
+  const [ingredientInput, setIngredientInput] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
+  const filteredSuggestions = commonIngredients.filter(
+  (item) =>
+    item.toLowerCase().includes(ingredientInput.toLowerCase()) &&
+    !ingredients.includes(item.toLowerCase())
+  );
 
-useEffect(() => {
-  const DEFAULT_DIET_TYPES = ['Balanced', 'Keto', 'Vegan', 'Low Carb', 'Paleo']
-
-  const fetchAndEnsureDietTypes = async () => {
-    try {
-      // 1. Ensure default diet types are in Firestore
-      const snapshot = await getDocs(collection(db, 'dietTypes'))
-      const namesInDb = snapshot.docs.map(doc => doc.data().name?.trim())
-
-      const missingDefaults = DEFAULT_DIET_TYPES.filter(
-        name => !namesInDb.includes(name)
-      )
-
-      for (const name of missingDefaults) {
-        await addDoc(collection(db, 'dietTypes'), {
-          name,
-          createdAt: serverTimestamp()
-        })
-      }
-
-      // 2. Fetch all sorted by createdAt
-      const sortedSnapshot = await getDocs(
-        query(collection(db, 'dietTypes'), orderBy('createdAt', 'asc'))
-      )
-
-      const sortedNames = sortedSnapshot.docs
-        .map(d => d.data().name?.trim())
-        .filter(Boolean)
-
-      // 3. Move defaults to front, preserve custom order
-      const custom = sortedNames.filter(name => !DEFAULT_DIET_TYPES.includes(name))
-      setDietTypes([...DEFAULT_DIET_TYPES, ...custom])
-    } catch (err) {
-      console.error('Error fetching diet types:', err)
-      toast.error('Failed to load diet types')
-    } finally {
-      setLoading(false)
+  const addIngredient = (val) => {
+    const clean = val.trim().toLowerCase();
+    if (clean && !ingredients.includes(clean)) {
+      setIngredients((prev) => [...prev, clean]);
     }
-  }
+    setIngredientInput(''); // Clear input after adding
+  };
 
-  fetchAndEnsureDietTypes()
-}, [])
 
 
   // --- Fetch Meals ---
@@ -126,31 +109,48 @@ useEffect(() => {
 
 const fetchTags = async () => {
   try {
-    const snap = await getDocs(query(collection(db, 'tags'), orderBy('createdAt', 'asc')));
-    let tags = snap.docs
+    const tagSnap = await getDocs(query(collection(db, 'tags'), orderBy('createdAt', 'asc')));
+    let tags = tagSnap.docs
       .map(doc => doc.data().name?.trim())
       .filter(Boolean)
-      .map(name => name.replace(/\b\w/g, l => l.toUpperCase())); // format consistently
+      .map(name => name.replace(/\b\w/g, l => l.toUpperCase()));
 
-    // Remove duplicates (case-insensitive)
-    tags = [...new Set(tags.map(t => t.toLowerCase()))].map(t =>
+    // Fetch other health conditions from all users
+    const userSnap = await getDocs(collection(db, 'users')); // or whatever your user collection is named
+    const otherConditions = userSnap.docs
+      .map(doc => doc.data().OtherHealthCondition)
+      .filter(Boolean) // remove null/undefined
+      .flatMap(cond => {
+        if (typeof cond === 'string') return [cond.trim()];
+        if (Array.isArray(cond)) return cond.map(c => c.trim());
+        return [];
+      })
+      .map(c => c.replace(/\b\w/g, l => l.toUpperCase()));
+
+    // Merge all tags and other conditions, remove duplicates (case-insensitive)
+    const combined = [...tags, ...otherConditions];
+    const uniqueTags = [...new Set(combined.map(t => t.toLowerCase()))].map(t =>
       t.replace(/\b\w/g, l => l.toUpperCase())
     );
 
+    // Seed default tags if tags collection was empty
     if (tags.length === 0) {
       const defaultTags = ['Diabetes', 'Hypertension', 'Heart Disease', 'Thyroid Disorder'];
       for (const tag of defaultTags) {
         await addDoc(collection(db, 'tags'), { name: tag, createdAt: serverTimestamp() });
       }
-      tags = defaultTags;
+      defaultTags.forEach(t => {
+        if (!uniqueTags.includes(t)) uniqueTags.push(t);
+      });
     }
 
-    setAllTags(tags);
+    setAllTags(uniqueTags);
   } catch (err) {
     toast.error("Failed to load tags.");
     console.error(err);
   }
 };
+
 
 
 useEffect(() => {
@@ -161,13 +161,15 @@ useEffect(() => {
   const resetForm = () => {
     setMealName(''); setDescription('')
     setCalories(''); setPrice('')
-    setCategory('Breakfast'); setDietType('Balanced')
+    setCategory('Breakfast'); 
+    setGoal('Weight Loss')
     setGoodFor([]); setAvailable(true)
     setImage(null); setPreview(null); setEditIndex(null)
     setProtein('');
     setCarbs('');
     setFat('');
-
+    setIngredients([]);
+    setIngredientInput('');
   }
 
   const toggleTag = tag =>
@@ -192,15 +194,22 @@ useEffect(() => {
 
   const handleEdit = idx => {
     const m = meals[idx]
-    setMealName(m.mealName); setDescription(m.description)
-    setCalories(m.calories); setPrice(m.price)
-    setCategory(m.category); setDietType(m.dietType)
-    setGoodFor(m.goodFor || []); setAvailable(m.available)
-    setPreview(m.image); setEditIndex(idx); setShowModal(true)
+    setMealName(m.mealName); 
+    setDescription(m.description)
+    setCalories(m.calories); 
+    setPrice(m.price)
+    setCategory(m.category); 
+    setGoal(m.goal || 'Weight Loss')
+    setGoodFor(m.goodFor || []); 
+    setAvailable(m.available)
+    setPreview(m.image); 
+    setEditIndex(idx); 
+    setShowModal(true)
     setProtein(m.protein || '');
     setCarbs(m.carbs || '');
     setFat(m.fat || '');
-
+    setIngredients(m.ingredients || []);
+    setIngredientInput('');
   }
 
   const handleSubmit = async e => {
@@ -240,7 +249,7 @@ useEffect(() => {
         calories: +calories,
         price: +price,
         category,
-        dietType,
+        goal,
         goodFor,
         available,
         image: imgUrl,
@@ -248,6 +257,7 @@ useEffect(() => {
         protein: +protein,
         carbs: +carbs,
         fat: +fat,
+        ingredients: ingredients.filter(i => i.trim() !== ''),
       };
 
       if (editIndex !== null) {
@@ -369,7 +379,7 @@ const handleDelete = async () => {
                   {/* Calories + Macros */}
                   <div className="flex justify-between items-center mt-2 text-sm text-gray-500">
                     <span>
-                      {m.calories} cal · {m.category} · {m.dietType}
+                      {m.calories} cal · {m.category} · {m.goal}
                     </span>
                     <span className="text-xs text-gray-500 whitespace-nowrap">
                       {m.protein}g Protein · {m.carbs}g Carbs · {m.fat}g Fats
@@ -425,53 +435,69 @@ const handleDelete = async () => {
             </h2>
 
             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <input type="text" value={mealName} onChange={e => setMealName(e.target.value)}
-                placeholder="Meal Name" className="w-full border-b px-2 py-2" required />
+              <input
+  type="text"
+  value={mealName}
+  onChange={e => setMealName(e.target.value)}
+  placeholder="Meal Name"
+  className="w-full border-0 border-b border-gray-300 focus:border-indigo-500 focus:ring-0 outline-none px-2 py-2 text-sm"
+  required
+/>
 
-              <input type="number" value={calories} onChange={e => setCalories(e.target.value)}
-                placeholder="Calories" className="w-full border-b px-2 py-2" required />
+<input
+  type="number"
+  value={calories}
+  onChange={e => setCalories(e.target.value)}
+  placeholder="Calories"
+  className="w-full border-0 border-b border-gray-300 focus:border-indigo-500 focus:ring-0 outline-none px-2 py-2 text-sm"
+  required
+/>
 
-              <input type="number" value={price} onChange={e => setPrice(e.target.value)}
-                placeholder="Price (₱)" className="w-full border-b px-2 py-2" required />
+<input
+  type="number"
+  value={price}
+  onChange={e => setPrice(e.target.value)}
+  placeholder="Price (₱)"
+  className="w-full border-0 border-b border-gray-300 focus:border-indigo-500 focus:ring-0 outline-none px-2 py-2 text-sm"
+  required
+/>
 
-              <select value={category} onChange={e => setCategory(e.target.value)}
-                className="w-full border-b px-2 py-2">
-                {categories.slice(1).map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-              {/* ...inside your form layout in the modal... */}
-
-        <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Diet Type */}
-       <select
-  value={dietType}
-  onChange={(e) => {
-    const value = e.target.value;
-    if (value === '__add_new__') {
-      setShowAddDietModal(true);
-      return;
-    }
-    setDietType(value);
-  }}
-  className="w-full border-b px-2 py-2"
+<select
+  value={category}
+  onChange={e => setCategory(e.target.value)}
+  className="w-full border-0 border-b border-gray-300 focus:border-indigo-500 focus:ring-0 outline-none px-2 py-2 text-sm bg-transparent"
 >
-  {dietTypes.map((type) => (
-    <option key={type} value={type}>{type}</option>
+  {categories.slice(1).map(c => (
+    <option key={c} value={c}>
+      {c}
+    </option>
   ))}
-  <option value="__add_new__" className="text-indigo-600">+ Add new diet type</option>
 </select>
 
+<div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+  {/* Diet Type */}
+  <select
+    value={goal}
+    onChange={(e) => setGoal(e.target.value)}
+    className="w-full border-0 border-b border-gray-300 focus:border-indigo-500 focus:ring-0 outline-none px-2 py-2 text-sm bg-transparent"
+  >
+   {goals.map((goal) => (
+    <option key={goal} value={goal}>{goal}</option>
+  ))}
 
-        {/* Availability */}
-        <select
-          value={available ? 'Available' : 'Unavailable'}
-          onChange={(e) => setAvailable(e.target.value === 'Available')}
-          className="w-full border-b px-2 py-2"
-        >
-          <option value="Available">Available</option>
-          <option value="Unavailable">Unavailable</option>
-        </select>
-      </div>
+  </select>
 
+
+  {/* Availability */}
+  <select
+    value={available ? 'Available' : 'Unavailable'}
+    onChange={(e) => setAvailable(e.target.value === 'Available')}
+    className="w-full border-0 border-b border-gray-300 focus:border-indigo-500 focus:ring-0 outline-none px-2 py-2 text-sm bg-transparent"
+  >
+    <option value="Available">Available</option>
+    <option value="Unavailable">Unavailable</option>
+  </select>
+</div>
 
 
 {/* Macros Row */}
@@ -481,54 +507,134 @@ const handleDelete = async () => {
     value={protein}
     onChange={(e) => setProtein(e.target.value)}
     placeholder="Protein (g)"
-    className="w-full border-b px-2 py-2"
+    className="w-full border-0 border-b border-gray-300 focus:border-indigo-500 focus:ring-0 outline-none px-2 py-2 text-sm bg-transparent"
   />
   <input
     type="number"
     value={carbs}
     onChange={(e) => setCarbs(e.target.value)}
     placeholder="Carbs (g)"
-    className="w-full border-b px-2 py-2"
+    className="w-full border-0 border-b border-gray-300 focus:border-indigo-500 focus:ring-0 outline-none px-2 py-2 text-sm bg-transparent"
   />
   <input
     type="number"
     value={fat}
     onChange={(e) => setFat(e.target.value)}
     placeholder="Fat (g)"
-    className="w-full border-b px-2 py-2"
+    className="w-full border-0 border-b border-gray-300 focus:border-indigo-500 focus:ring-0 outline-none px-2 py-2 text-sm bg-transparent"
   />
 </div>
+
 
 {/* Description Field */}
 <textarea
   value={description}
   onChange={(e) => setDescription(e.target.value)}
   placeholder="Description"
-  className="col-span-1 md:col-span-2 border-b px-2 py-2 resize-none"
+  className="col-span-1 md:col-span-2 border-0 border-b border-gray-300 focus:border-indigo-500 focus:ring-0 outline-none px-2 py-2 text-sm bg-transparent resize-none"
 />
 
-              <div className="col-span-1 md:col-span-2">
-                <div className="flex flex-wrap gap-2 items-center mb-2">
-                  {allTags.map(tag => (
-  <label key={tag} className="text-sm">
-    <input type="checkbox" checked={goodFor.includes(tag)}
-      onChange={() => toggleTag(tag)} className="mr-1" />
-    {tag}
+{/* Dynamic Ingredients Input */}
+<div className="col-span-1 md:col-span-2 relative">
+  <label className="block text-sm font-medium text-gray-700 mb-1">
+    Ingredients
   </label>
-))}
 
-<button
-  type="button"
-  onClick={() => setShowAddTagModal(true)}
-  className="text-indigo-600 text-sm underline ml-2"
->
-  + Add new tag
-</button>
+  {/* Ingredient chips with top-right x */}
+  <div className="flex flex-wrap gap-2 mb-2">
+    {ingredients.map((ing, idx) => (
+      <div
+        key={idx}
+        className="relative bg-indigo-50 text-indigo-700 px-3 py-1 rounded-xs text-sm shadow-sm"
+      >
+        {ing}
+        <button
+          type="button"
+          onClick={() =>
+            setIngredients((prev) => prev.filter((_, i) => i !== idx))
+          }
+          className="absolute -top-1 -right-1 bg-gray-400 hover:bg-gray-500 text-white rounded-full p-[2px] focus:outline-none"
+        >
+          <XMarkIcon className="h-3 w-3" />
+        </button>
+      </div>
+    ))}
+  </div>
 
-                </div>
-              </div>
+  {/* Input with dropdown */}
+  <div className="relative">
+    <input
+      type="text"
+      value={ingredientInput}
+      onChange={(e) => {
+        setIngredientInput(e.target.value);
+        setShowSuggestions(true);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          addIngredient(ingredientInput);
+        }
+      }}
+      onBlur={() => setTimeout(() => setShowSuggestions(false), 100)}
+      placeholder="Type an ingredient and press Enter"
+      className="w-full border-b border-gray-300 focus:border-indigo-500 outline-none px-1 py-2 placeholder-gray-400 transition-all"
+    />
 
-            <div
+    {showSuggestions && filteredSuggestions.length > 0 && (
+      <ul className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-md max-h-48 overflow-y-auto">
+        {filteredSuggestions.map((item, idx) => (
+          <li
+            key={idx}
+            onMouseDown={() => addIngredient(item)}
+            className="px-3 py-2 text-sm hover:bg-indigo-100 cursor-pointer"
+          >
+            {item}
+          </li>
+        ))}
+      </ul>
+    )}
+  </div>
+</div>
+
+
+
+<div className="col-span-1 md:col-span-2">
+  <label className="block text-sm font-medium text-gray-700 mb-1">Recommended For</label>
+
+  <div className="flex flex-wrap gap-2 items-center mb-2">
+    {allTags.map((tag) => (
+      <label
+        key={tag}
+        className={`text-sm px-3 py-1 rounded-full border ${
+          goodFor.includes(tag)
+            ? 'bg-indigo-100 text-indigo-700 border-indigo-300'
+            : 'bg-gray-100 text-gray-700 border-gray-300'
+        } cursor-pointer transition-all duration-150`}
+      >
+        <input
+          type="checkbox"
+          checked={goodFor.includes(tag)}
+          onChange={() => toggleTag(tag)}
+          className="hidden"
+        />
+        {tag}
+      </label>
+    ))}
+
+    <button
+      type="button"
+      onClick={() => setShowAddTagModal(true)}
+      className="ml-2 text-sm text-indigo-600 hover:underline font-medium"
+    >
+      + Add new tag
+    </button>
+  </div>
+</div>
+
+
+
+<div
   ref={dropRef}
   onClick={() => fileInputRef.current?.click()}
   onDrop={onDrop}
@@ -561,58 +667,6 @@ const handleDelete = async () => {
             </form>
           </div>
         </div>
-      )}
-      {showAddDietModal && (
-  <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-    <div className="bg-white p-6 rounded-xl shadow-xl w-full max-w-md relative">
-      <button onClick={() => setShowAddDietModal(false)}
-        className="absolute top-3 right-4 text-xl text-gray-400 hover:text-red-500">
-        &times;
-      </button>
-      <h2 className="text-lg font-bold mb-4 text-indigo-600">Add New Diet Type</h2>
-<form onSubmit={async (e) => {
-  e.preventDefault();
-  let type = newDietType.trim();
-  if (!type) return toast.error("Enter a valid diet type.");
-
-  // Capitalize each word
-  type = type.replace(/\b\w/g, l => l.toUpperCase());
-
-  // Check for duplicates (case-insensitive match on formatted type)
-  const exists = dietTypes.some(t => t.trim().toLowerCase() === type.toLowerCase());
-  if (exists) {
-    toast.error("Diet type already exists.");
-    return;
-  }
-
-  try {
-    await addDoc(collection(db, 'dietTypes'), { name: type, createdAt: serverTimestamp() });
-    setDietTypes(prev => [...prev, type]);
-    setDietType(type);
-    setNewDietType('');
-    setShowAddDietModal(false);
-    toast.success("Diet type added!");
-  } catch {
-    toast.error("Failed to add diet type.");
-  }
-}}>
-
-
-        <input
-          type="text"
-          value={newDietType}
-          onChange={(e) => setNewDietType(e.target.value)}
-          placeholder="e.g. Mediterranean"
-          className="w-full border-b px-3 py-2 mb-4"
-        />
-        <div className="flex justify-end">
-          <button type="submit" className="bg-indigo-600 text-white px-5 py-2 rounded hover:bg-indigo-500">
-            Add
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
       )}
       {showAddTagModal && (
   <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
